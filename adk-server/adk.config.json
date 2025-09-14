@@ -1,0 +1,54 @@
+{
+  "server": {
+    "port": 8080,
+    "host": "0.0.0.0"
+  },
+  "database": {
+    "type": "postgres",
+    "host": "localhost",
+    "port": 5432,
+    "database": "adk_chat",
+    "username": "postgres",
+    "password": "password"
+  },
+  "agents": [
+    {
+      "id": "math-assistant",
+      "name": "Math Assistant",
+      "description": "A helpful assistant that can perform mathematical calculations and solve problems",
+      "tools": ["calculator", "equation_solver"]
+    },
+    {
+      "id": "web-researcher",
+      "name": "Web Researcher",
+      "description": "An assistant that can search the web and fetch information from URLs",
+      "tools": ["web_search", "url_fetcher"]
+    }
+  ],
+  "tools": [
+    {
+      "id": "calculator",
+      "name": "Calculator",
+      "description": "Performs basic mathematical operations",
+      "type": "function"
+    },
+    {
+      "id": "equation_solver",
+      "name": "Equation Solver",
+      "description": "Solves mathematical equations",
+      "type": "function"
+    },
+    {
+      "id": "web_search",
+      "name": "Web Search",
+      "description": "Searches the web for information",
+      "type": "function"
+    },
+    {
+      "id": "url_fetcher",
+      "name": "URL Fetcher",
+      "description": "Fetches content from a given URL",
+      "type": "function"
+    }
+  ]
+}
