@@ -114,6 +114,25 @@ POSTGRES_USER=postgres
 POSTGRES_PASSWORD=password
 ```
 
+#### OpenAI Fallback Configuration
+
+When the ADK server is unavailable, the application can automatically fall back to OpenAI's API for a seamless user experience. Add these variables to your `.env.local`:
+
+```bash
+# OpenAI Fallback Configuration
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-4o-mini
+ENABLE_OPENAI_FALLBACK=true
+```
+
+**Features:**
+- 🔄 **Automatic Fallback**: Seamlessly switches to OpenAI when ADK server is down
+- 🎯 **Preserved Experience**: Maintains same UI/UX with OpenAI backend
+- 📝 **Thread Management**: Creates and manages conversation threads
+- 🔒 **Secure**: Only activates when ADK is unreachable and properly configured
+
+**Note**: The OpenAI fallback provides a similar chat experience but won't have access to the custom tools available in the ADK agents (calculator, web search, etc.).
+
 ### Agents and Tools
 
 The ADK server comes with two sample agents:

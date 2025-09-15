@@ -30,28 +30,53 @@ async function proxyToADK(request: Request, method: string) {
     body = await request.arrayBuffer();
   }
 
-  const response = await fetch(adkUrl, {
-    method,
-    headers,
-    body,
-  });
+  try {
+    const response = await fetch(adkUrl, {
+      method,
+      headers,
+      body,
+      // Add timeout to prevent hanging
+      signal: AbortSignal.timeout(10000), // 10 second timeout
+    });
 
-  // Create response with proper headers for streaming
-  const responseHeaders = new Headers();
-  responseHeaders.set('access-control-allow-origin', '*');
-  responseHeaders.set('access-control-allow-methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-  responseHeaders.set('access-control-allow-headers', 'content-type, authorization');
+    // Create response with proper headers for streaming
+    const responseHeaders = new Headers();
+    responseHeaders.set('access-control-allow-origin', '*');
+    responseHeaders.set('access-control-allow-methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    responseHeaders.set('access-control-allow-headers', 'content-type, authorization');
 
-  // Copy content-type and other important headers
-  if (response.headers.get('content-type')) {
-    responseHeaders.set('content-type', response.headers.get('content-type')!);
+    // Copy content-type and other important headers
+    if (response.headers.get('content-type')) {
+      responseHeaders.set('content-type', response.headers.get('content-type')!);
+    }
+
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders,
+    });
+  } catch (error) {
+    console.error('ADK Server connection error:', error);
+    
+    // Return a structured error response
+    const errorResponse = {
+      error: 'ADK_SERVER_UNAVAILABLE',
+      message: 'Unable to connect to ADK server. Please check if the server is running.',
+      details: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+    };
+
+    return new Response(JSON.stringify(errorResponse), {
+      status: 503, // Service Unavailable
+      statusText: 'ADK Server Unavailable',
+      headers: {
+        'content-type': 'application/json',
+        'access-control-allow-origin': '*',
+        'access-control-allow-methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
+        'access-control-allow-headers': 'content-type, authorization',
+      },
+    });
   }
-
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers: responseHeaders,
-  });
 }
 
 export async function GET(request: Request) {

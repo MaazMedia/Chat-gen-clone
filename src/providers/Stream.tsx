@@ -5,6 +5,7 @@ import React, {
   useState,
   useEffect,
   useCallback,
+  useMemo,
 } from "react";
 import { useQueryState } from "nuqs";
 import { Input } from "@/components/ui/input";
@@ -16,20 +17,12 @@ import { PasswordInput } from "@/components/ui/password-input";
 import { getApiKey } from "@/lib/api-key";
 import { useThreads } from "./Thread";
 import { toast } from "sonner";
-import { createClient, AdkApiClient } from "./client";
+import { createClient, AdkApiClient, ADKServerError } from "./client";
+import { Message } from "@/lib/adk-types";
 
-// ADK Message interface
-export interface AdkMessage {
-  id: string;
-  thread_id: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  metadata?: any;
-  created_at: string;
-}
-
+// ADK Stream State using standard Message type
 export interface AdkStreamState {
-  messages: AdkMessage[];
+  messages: Message[];
   isStreaming: boolean;
   error?: string;
 }
@@ -40,6 +33,12 @@ interface StreamContextType {
   createThread: () => Promise<string | null>;
   loadMessages: (threadId: string) => Promise<void>;
   clearError: () => void;
+  // LangGraph compatibility methods
+  messages: Message[];
+  getMessagesMetadata: (message: any) => any;
+  submit: (content: string, options?: any) => Promise<void>;
+  setBranch: (branch: any) => void;
+  interrupt: any;
 }
 
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
@@ -86,8 +85,32 @@ const StreamSession = ({
     isStreaming: false,
   });
 
-  const client = createClient(apiUrl, apiKey ?? undefined);
-  const apiClient = new AdkApiClient(client);
+  const [openaiConfig, setOpenaiConfig] = useState<{
+    apiKey: string;
+    model: string;
+    enabled: boolean;
+  } | null>(null);
+
+  // Load OpenAI configuration on mount
+  useEffect(() => {
+    const loadOpenAIConfig = async () => {
+      try {
+        const response = await fetch('/api/openai-config');
+        const config = await response.json();
+        if (config.enabled) {
+          setOpenaiConfig(config);
+        }
+      } catch (error) {
+        console.log('OpenAI fallback not configured:', error);
+      }
+    };
+    loadOpenAIConfig();
+  }, []);
+
+  const apiClient = useMemo(() => {
+    const client = createClient(apiUrl, apiKey ?? undefined);
+    return new AdkApiClient(client, openaiConfig || undefined);
+  }, [apiUrl, apiKey, openaiConfig]);
 
   const loadMessages = useCallback(async (threadId: string) => {
     try {
@@ -114,6 +137,30 @@ const StreamSession = ({
       return newThreadId;
     } catch (error) {
       console.error('Failed to create thread:', error);
+      
+      if (error instanceof ADKServerError) {
+        if (error.code === 'ADK_SERVER_UNAVAILABLE' || error.code === 'NETWORK_ERROR') {
+          toast.error('ADK Server Unavailable', {
+            description: 'Please start the ADK server (npm start in adk-server folder) or check your connection.',
+            duration: 10000,
+            action: {
+              label: 'Retry',
+              onClick: () => window.location.reload(),
+            },
+          });
+        } else {
+          toast.error('Failed to create thread', {
+            description: error.message,
+            duration: 5000,
+          });
+        }
+      } else {
+        toast.error('Failed to create thread', {
+          description: 'An unexpected error occurred.',
+          duration: 5000,
+        });
+      }
+      
       setState(prev => ({ 
         ...prev, 
         error: 'Failed to create thread' 
@@ -130,9 +177,8 @@ const StreamSession = ({
 
     try {
       // Add user message to state immediately
-      const userMessage: AdkMessage = {
+      const userMessage: Message = {
         id: Date.now().toString(),
-        thread_id: currentThreadId,
         role: 'user',
         content,
         created_at: new Date().toISOString(),
@@ -149,7 +195,7 @@ const StreamSession = ({
       const decoder = new TextDecoder();
 
       let accumulatedContent = '';
-      let assistantMessage: AdkMessage | null = null;
+      let assistantMessage: Message | null = null;
 
       try {
         while (true) {
@@ -184,12 +230,13 @@ const StreamSession = ({
                       // Create new assistant message
                       assistantMessage = {
                         id: (Date.now() + 1).toString(),
-                        thread_id: currentThreadId,
                         role: 'assistant',
                         content: accumulatedContent.trim(),
                         created_at: new Date().toISOString(),
                       };
-                      messages.push(assistantMessage);
+                      if (assistantMessage) {
+                        messages.push(assistantMessage);
+                      }
                     }
                     
                     return { ...prev, messages };
@@ -214,6 +261,30 @@ const StreamSession = ({
       }
     } catch (error) {
       console.error('Failed to send message:', error);
+      
+      if (error instanceof ADKServerError) {
+        if (error.code === 'ADK_SERVER_UNAVAILABLE' || error.code === 'NETWORK_ERROR') {
+          toast.error('ADK Server Unavailable', {
+            description: 'Please start the ADK server (npm start in adk-server folder) or check your connection.',
+            duration: 10000,
+            action: {
+              label: 'Retry',
+              onClick: () => window.location.reload(),
+            },
+          });
+        } else {
+          toast.error('Failed to send message', {
+            description: error.message,
+            duration: 5000,
+          });
+        }
+      } else {
+        toast.error('Failed to send message', {
+          description: 'An unexpected error occurred.',
+          duration: 5000,
+        });
+      }
+      
       setState(prev => ({ 
         ...prev, 
         error: 'Failed to send message' 
@@ -260,6 +331,24 @@ const StreamSession = ({
     createThread,
     loadMessages,
     clearError,
+    // LangGraph compatibility methods
+    messages: state.messages,
+    getMessagesMetadata: (message: any) => {
+      // Return empty metadata for ADK compatibility
+      return {
+        firstSeenState: null,
+        parentCheckpoint: null,
+      };
+    },
+    submit: async (content: string, options?: any) => {
+      // Redirect to sendMessage for ADK compatibility
+      await sendMessage(content, options?.files);
+    },
+    setBranch: (branch: any) => {
+      // No-op for ADK compatibility
+      console.log('setBranch not implemented for ADK');
+    },
+    interrupt: null, // No interrupt support in ADK
   };
 
   return (
@@ -281,16 +370,25 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const envAssistantId: string | undefined =
     process.env.NEXT_PUBLIC_ASSISTANT_ID;
 
+  // Check for special parameters
+  const [forceConfig] = useQueryState("setup");
+  const [clearConfig] = useQueryState("clear");
+
   // Use URL params with env var fallbacks
   const [apiUrl, setApiUrl] = useQueryState("apiUrl", {
-    defaultValue: envApiUrl || "",
+    defaultValue: "",
   });
   const [assistantId, setAssistantId] = useQueryState("assistantId", {
-    defaultValue: envAssistantId || "",
+    defaultValue: "",
   });
 
   // For API key, use localStorage with env var fallback
   const [apiKey, _setApiKey] = useState(() => {
+    // Clear localStorage if requested
+    if (clearConfig === "true") {
+      window.localStorage.removeItem("lg:chat:apiKey");
+      return "";
+    }
     const storedKey = getApiKey();
     return storedKey || "";
   });
@@ -300,12 +398,37 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     _setApiKey(key);
   };
 
-  // Determine final values to use, prioritizing URL params then env vars
-  const finalApiUrl = apiUrl || envApiUrl;
-  const finalAssistantId = assistantId || envAssistantId;
+  // Check if user has configured anything before (first-time check)
+  const hasUserConfigured = () => {
+    // Force show config if requested
+    if (forceConfig === "true" || clearConfig === "true") {
+      return false;
+    }
 
-  // Show the form if we: don't have an API URL, or don't have an assistant ID
-  if (!finalApiUrl || !finalAssistantId) {
+    // Check if user has any stored configuration
+    const hasStoredApiKey = !!getApiKey();
+    const hasUrlParams = !!(apiUrl || assistantId);
+    const hasEnvVars = !!(envApiUrl || envAssistantId);
+    
+    // If there are URL params, user has configured something
+    if (hasUrlParams) return true;
+    
+    // If there are env vars but no stored key and no URL params, 
+    // treat as configured (developer has set up environment)
+    if (hasEnvVars && !hasStoredApiKey) return true;
+    
+    // If user has stored an API key, they've configured before
+    if (hasStoredApiKey) return true;
+    
+    return false;
+  };
+
+  // Determine final values to use, prioritizing URL params then env vars then defaults
+  const finalApiUrl = apiUrl || envApiUrl || DEFAULT_API_URL;
+  const finalAssistantId = assistantId || envAssistantId || DEFAULT_ASSISTANT_ID;
+
+  // Show the form if the user hasn't configured anything before
+  if (!hasUserConfigured()) {
     return (
       <div className="flex min-h-screen w-full items-center justify-center p-4">
         <div className="animate-in fade-in-0 zoom-in-95 bg-background flex max-w-3xl flex-col rounded-lg border shadow-lg">
@@ -317,8 +440,8 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
               </h1>
             </div>
             <p className="text-muted-foreground">
-              Welcome to ADK Agent Chat! Before you get started, you need to enter
-              the URL of the ADK server and the assistant / agent ID.
+              Welcome to ADK Agent Chat! Let's get you set up with your ADK server 
+              configuration. The default values should work for most local development setups.
             </p>
           </div>
           <form
@@ -351,7 +474,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
                 id="apiUrl"
                 name="apiUrl"
                 className="bg-background"
-                defaultValue={apiUrl || DEFAULT_API_URL}
+                defaultValue={apiUrl || envApiUrl || DEFAULT_API_URL}
                 required
               />
             </div>
@@ -367,7 +490,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
                 id="assistantId"
                 name="assistantId"
                 className="bg-background"
-                defaultValue={assistantId || DEFAULT_ASSISTANT_ID}
+                defaultValue={assistantId || envAssistantId || DEFAULT_ASSISTANT_ID}
                 required
               />
             </div>

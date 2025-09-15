@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQueryState } from 'nuqs';
-import { createClient, AdkApiClient } from '@/providers/client';
+import { createClient, AdkApiClient, ADKServerError } from '@/providers/client';
 import { getApiKey } from '@/lib/api-key';
 import {
   Select,
@@ -47,9 +47,29 @@ export function AgentPicker() {
       }
     } catch (error) {
       console.error('Failed to fetch agents:', error);
-      toast.error('Failed to load agents', {
-        description: 'Could not fetch available agents from the server.',
-      });
+      
+      if (error instanceof ADKServerError) {
+        if (error.code === 'ADK_SERVER_UNAVAILABLE' || error.code === 'NETWORK_ERROR') {
+          toast.error('ADK Server Unavailable', {
+            description: 'Please start the ADK server (npm start in adk-server folder) or check your connection.',
+            duration: 10000,
+            action: {
+              label: 'Retry',
+              onClick: () => fetchAgents(),
+            },
+          });
+        } else {
+          toast.error('Failed to load agents', {
+            description: error.message,
+            duration: 5000,
+          });
+        }
+      } else {
+        toast.error('Failed to load agents', {
+          description: 'Could not fetch available agents from the server.',
+          duration: 5000,
+        });
+      }
     } finally {
       setLoading(false);
     }
