@@ -33,6 +33,9 @@ interface StreamContextType {
   createThread: () => Promise<string | null>;
   loadMessages: (threadId: string) => Promise<void>;
   clearError: () => void;
+  // Hide tool calls functionality
+  hideToolCalls: boolean;
+  setHideToolCalls: (hide: boolean) => void;
   // LangGraph compatibility methods
   messages: Message[];
   getMessagesMetadata: (message: any) => any;
@@ -55,7 +58,7 @@ async function checkApiStatus(
     const res = await fetch(`${apiUrl}/agents`, {
       ...(apiKey && {
         headers: {
-          "Authorization": `Bearer ${apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
         },
       }),
     });
@@ -85,6 +88,23 @@ const StreamSession = ({
     isStreaming: false,
   });
 
+  // Hide tool calls state with localStorage persistence
+  const [hideToolCalls, setHideToolCalls] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("adk:hideToolCalls");
+      return stored ? JSON.parse(stored) : false;
+    }
+    return false;
+  });
+
+  // Persist hideToolCalls preference to localStorage
+  const updateHideToolCalls = (hide: boolean) => {
+    setHideToolCalls(hide);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("adk:hideToolCalls", JSON.stringify(hide));
+    }
+  };
+
   const [openaiConfig, setOpenaiConfig] = useState<{
     apiKey: string;
     model: string;
@@ -95,13 +115,13 @@ const StreamSession = ({
   useEffect(() => {
     const loadOpenAIConfig = async () => {
       try {
-        const response = await fetch('/api/openai-config');
+        const response = await fetch("/api/openai-config");
         const config = await response.json();
         if (config.enabled) {
           setOpenaiConfig(config);
         }
       } catch (error) {
-        console.log('OpenAI fallback not configured:', error);
+        console.log("OpenAI fallback not configured:", error);
       }
     };
     loadOpenAIConfig();
@@ -112,190 +132,215 @@ const StreamSession = ({
     return new AdkApiClient(client, openaiConfig || undefined);
   }, [apiUrl, apiKey, openaiConfig]);
 
-  const loadMessages = useCallback(async (threadId: string) => {
-    try {
-      const response = await apiClient.getMessages(threadId);
-      setState(prev => ({ ...prev, messages: response.messages || [] }));
-    } catch (error) {
-      console.error('Failed to load messages:', error);
-      setState(prev => ({ 
-        ...prev, 
-        error: 'Failed to load messages' 
-      }));
-    }
-  }, [apiClient]);
+  const loadMessages = useCallback(
+    async (threadId: string) => {
+      try {
+        const response = await apiClient.getMessages(threadId);
+        setState((prev) => ({ ...prev, messages: response.messages || [] }));
+      } catch (error) {
+        console.error("Failed to load messages:", error);
+        setState((prev) => ({
+          ...prev,
+          error: "Failed to load messages",
+        }));
+      }
+    },
+    [apiClient],
+  );
 
   const createThread = useCallback(async (): Promise<string | null> => {
     try {
       const response = await apiClient.createThread(assistantId);
       const newThreadId = response.thread.id;
       setThreadId(newThreadId);
-      
+
       // Refetch threads list
       sleep().then(() => getThreads().then(setThreads).catch(console.error));
-      
+
       return newThreadId;
     } catch (error) {
-      console.error('Failed to create thread:', error);
-      
+      console.error("Failed to create thread:", error);
+
       if (error instanceof ADKServerError) {
-        if (error.code === 'ADK_SERVER_UNAVAILABLE' || error.code === 'NETWORK_ERROR') {
-          toast.error('ADK Server Unavailable', {
-            description: 'Please start the ADK server (npm start in adk-server folder) or check your connection.',
+        if (
+          error.code === "ADK_SERVER_UNAVAILABLE" ||
+          error.code === "NETWORK_ERROR"
+        ) {
+          toast.error("ADK Server Unavailable", {
+            description:
+              "Please start the ADK server (npm start in adk-server folder) or check your connection.",
             duration: 10000,
             action: {
-              label: 'Retry',
+              label: "Retry",
               onClick: () => window.location.reload(),
             },
           });
         } else {
-          toast.error('Failed to create thread', {
+          toast.error("Failed to create thread", {
             description: error.message,
             duration: 5000,
           });
         }
       } else {
-        toast.error('Failed to create thread', {
-          description: 'An unexpected error occurred.',
+        toast.error("Failed to create thread", {
+          description: "An unexpected error occurred.",
           duration: 5000,
         });
       }
-      
-      setState(prev => ({ 
-        ...prev, 
-        error: 'Failed to create thread' 
+
+      setState((prev) => ({
+        ...prev,
+        error: "Failed to create thread",
       }));
       return null;
     }
   }, [assistantId, apiClient, setThreadId, getThreads, setThreads]);
 
-  const sendMessage = useCallback(async (content: string, files?: File[]) => {
-    const currentThreadId = threadId || await createThread();
-    if (!currentThreadId) return;
+  const sendMessage = useCallback(
+    async (content: string, files?: File[]) => {
+      const currentThreadId = threadId || (await createThread());
+      if (!currentThreadId) return;
 
-    setState(prev => ({ ...prev, isStreaming: true, error: undefined }));
-
-    try {
-      // Add user message to state immediately
-      const userMessage: Message = {
-        id: Date.now().toString(),
-        role: 'user',
-        content,
-        created_at: new Date().toISOString(),
-      };
-
-      setState(prev => ({ 
-        ...prev, 
-        messages: [...prev.messages, userMessage] 
-      }));
-
-      // Start streaming response
-      const stream = await apiClient.streamMessage(currentThreadId, content, assistantId);
-      const reader = stream.getReader();
-      const decoder = new TextDecoder();
-
-      let accumulatedContent = '';
-      let assistantMessage: Message | null = null;
+      setState((prev) => ({ ...prev, isStreaming: true, error: undefined }));
 
       try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        // Add user message to state immediately
+        const userMessage: Message = {
+          id: Date.now().toString(),
+          role: "user",
+          content,
+          created_at: new Date().toISOString(),
+        };
 
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n');
+        setState((prev) => ({
+          ...prev,
+          messages: [...prev.messages, userMessage],
+        }));
 
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                
-                if (data.type === 'chunk') {
-                  accumulatedContent += data.content;
-                  
-                  // Update or create assistant message
-                  setState(prev => {
-                    const messages = [...prev.messages];
-                    const lastMessageIndex = messages.length - 1;
-                    
-                    if (assistantMessage) {
-                      // Update existing assistant message
-                      const updatedMessage = {
-                        ...assistantMessage,
-                        content: accumulatedContent.trim(),
-                      };
-                      messages[lastMessageIndex] = updatedMessage;
-                      assistantMessage = updatedMessage;
-                    } else {
-                      // Create new assistant message
-                      assistantMessage = {
-                        id: (Date.now() + 1).toString(),
-                        role: 'assistant',
-                        content: accumulatedContent.trim(),
-                        created_at: new Date().toISOString(),
-                      };
-                      if (assistantMessage) {
-                        messages.push(assistantMessage);
+        // Start streaming response
+        const stream = await apiClient.streamMessage(
+          currentThreadId,
+          content,
+          assistantId,
+        );
+        const reader = stream.getReader();
+        const decoder = new TextDecoder();
+
+        let accumulatedContent = "";
+        let assistantMessage: Message | null = null;
+        let tempAssistantMessageId: string | null = null;
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value);
+            const lines = chunk.split("\n");
+
+            for (const line of lines) {
+              if (line.startsWith("data: ")) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+
+                  if (data.type === "chunk") {
+                    accumulatedContent += data.content;
+
+                    // Update or create assistant message
+                    setState((prev) => {
+                      const messages = [...prev.messages];
+                      const lastMessageIndex = messages.length - 1;
+
+                      if (assistantMessage && tempAssistantMessageId) {
+                        // Update existing assistant message
+                        const updatedMessage = {
+                          ...assistantMessage,
+                          content: accumulatedContent.trim(),
+                        };
+                        messages[lastMessageIndex] = updatedMessage;
+                        assistantMessage = updatedMessage;
+                      } else {
+                        // Create new assistant message
+                        tempAssistantMessageId = `temp-${Date.now()}`;
+                        assistantMessage = {
+                          id: tempAssistantMessageId,
+                          role: "assistant",
+                          content: accumulatedContent.trim(),
+                          created_at: new Date().toISOString(),
+                        };
+                        if (assistantMessage) {
+                          messages.push(assistantMessage);
+                        }
                       }
-                    }
-                    
-                    return { ...prev, messages };
-                  });
-                } else if (data.type === 'message') {
-                  // Final message from server
-                  setState(prev => {
-                    const messages = prev.messages.filter(m => m.id !== data.message.id);
-                    return { ...prev, messages: [...messages, data.message] };
-                  });
-                } else if (data.type === 'end') {
-                  break;
+
+                      return { ...prev, messages };
+                    });
+                  } else if (data.type === "message") {
+                    // Final message from server - replace the temporary streaming message
+                    setState((prev) => {
+                      const messages = prev.messages.filter(
+                        (m) => m.id !== tempAssistantMessageId,
+                      );
+                      return { ...prev, messages: [...messages, data.message] };
+                    });
+                    // Reset the temporary message tracking
+                    assistantMessage = null;
+                    tempAssistantMessageId = null;
+                  } else if (data.type === "end") {
+                    break;
+                  }
+                } catch (e) {
+                  console.error("Failed to parse SSE data:", e);
                 }
-              } catch (e) {
-                console.error('Failed to parse SSE data:', e);
               }
             }
           }
+        } finally {
+          reader.releaseLock();
         }
-      } finally {
-        reader.releaseLock();
-      }
-    } catch (error) {
-      console.error('Failed to send message:', error);
-      
-      if (error instanceof ADKServerError) {
-        if (error.code === 'ADK_SERVER_UNAVAILABLE' || error.code === 'NETWORK_ERROR') {
-          toast.error('ADK Server Unavailable', {
-            description: 'Please start the ADK server (npm start in adk-server folder) or check your connection.',
-            duration: 10000,
-            action: {
-              label: 'Retry',
-              onClick: () => window.location.reload(),
-            },
-          });
+      } catch (error) {
+        console.error("Failed to send message:", error);
+
+        if (error instanceof ADKServerError) {
+          if (
+            error.code === "ADK_SERVER_UNAVAILABLE" ||
+            error.code === "NETWORK_ERROR"
+          ) {
+            toast.error("ADK Server Unavailable", {
+              description:
+                "Please start the ADK server (npm start in adk-server folder) or check your connection.",
+              duration: 10000,
+              action: {
+                label: "Retry",
+                onClick: () => window.location.reload(),
+              },
+            });
+          } else {
+            toast.error("Failed to send message", {
+              description: error.message,
+              duration: 5000,
+            });
+          }
         } else {
-          toast.error('Failed to send message', {
-            description: error.message,
+          toast.error("Failed to send message", {
+            description: "An unexpected error occurred.",
             duration: 5000,
           });
         }
-      } else {
-        toast.error('Failed to send message', {
-          description: 'An unexpected error occurred.',
-          duration: 5000,
-        });
+
+        setState((prev) => ({
+          ...prev,
+          error: "Failed to send message",
+        }));
+      } finally {
+        setState((prev) => ({ ...prev, isStreaming: false }));
       }
-      
-      setState(prev => ({ 
-        ...prev, 
-        error: 'Failed to send message' 
-      }));
-    } finally {
-      setState(prev => ({ ...prev, isStreaming: false }));
-    }
-  }, [threadId, assistantId, apiClient, createThread]);
+    },
+    [threadId, assistantId, apiClient, createThread],
+  );
 
   const clearError = useCallback(() => {
-    setState(prev => ({ ...prev, error: undefined }));
+    setState((prev) => ({ ...prev, error: undefined }));
   }, []);
 
   // Load messages when thread ID changes
@@ -303,7 +348,7 @@ const StreamSession = ({
     if (threadId) {
       loadMessages(threadId);
     } else {
-      setState(prev => ({ ...prev, messages: [] }));
+      setState((prev) => ({ ...prev, messages: [] }));
     }
   }, [threadId, loadMessages]);
 
@@ -313,8 +358,8 @@ const StreamSession = ({
         toast.error("Failed to connect to ADK server", {
           description: () => (
             <p>
-              Please ensure your ADK server is running at <code>{apiUrl}</code> and
-              your API key is correctly set (if required).
+              Please ensure your ADK server is running at <code>{apiUrl}</code>{" "}
+              and your API key is correctly set (if required).
             </p>
           ),
           duration: 10000,
@@ -331,6 +376,9 @@ const StreamSession = ({
     createThread,
     loadMessages,
     clearError,
+    // Hide tool calls functionality
+    hideToolCalls,
+    setHideToolCalls: updateHideToolCalls,
     // LangGraph compatibility methods
     messages: state.messages,
     getMessagesMetadata: (message: any) => {
@@ -346,7 +394,7 @@ const StreamSession = ({
     },
     setBranch: (branch: any) => {
       // No-op for ADK compatibility
-      console.log('setBranch not implemented for ADK');
+      console.log("setBranch not implemented for ADK");
     },
     interrupt: null, // No interrupt support in ADK
   };
@@ -409,23 +457,24 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     const hasStoredApiKey = !!getApiKey();
     const hasUrlParams = !!(apiUrl || assistantId);
     const hasEnvVars = !!(envApiUrl || envAssistantId);
-    
+
     // If there are URL params, user has configured something
     if (hasUrlParams) return true;
-    
-    // If there are env vars but no stored key and no URL params, 
+
+    // If there are env vars but no stored key and no URL params,
     // treat as configured (developer has set up environment)
     if (hasEnvVars && !hasStoredApiKey) return true;
-    
+
     // If user has stored an API key, they've configured before
     if (hasStoredApiKey) return true;
-    
+
     return false;
   };
 
   // Determine final values to use, prioritizing URL params then env vars then defaults
   const finalApiUrl = apiUrl || envApiUrl || DEFAULT_API_URL;
-  const finalAssistantId = assistantId || envAssistantId || DEFAULT_ASSISTANT_ID;
+  const finalAssistantId =
+    assistantId || envAssistantId || DEFAULT_ASSISTANT_ID;
 
   // Show the form if the user hasn't configured anything before
   if (!hasUserConfigured()) {
@@ -440,8 +489,9 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
               </h1>
             </div>
             <p className="text-muted-foreground">
-              Welcome to ADK Agent Chat! Let's get you set up with your ADK server 
-              configuration. The default values should work for most local development setups.
+              Welcome to ADK Agent Chat! Let's get you set up with your ADK
+              server configuration. The default values should work for most
+              local development setups.
             </p>
           </div>
           <form
@@ -467,8 +517,8 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
                 ADK Server URL<span className="text-rose-500">*</span>
               </Label>
               <p className="text-muted-foreground text-sm">
-                This is the URL of your ADK server. Usually the Next.js API proxy
-                endpoint (e.g., http://localhost:3000/api).
+                This is the URL of your ADK server. Usually the Next.js API
+                proxy endpoint (e.g., http://localhost:3000/api).
               </p>
               <Input
                 id="apiUrl"
@@ -490,7 +540,9 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
                 id="assistantId"
                 name="assistantId"
                 className="bg-background"
-                defaultValue={assistantId || envAssistantId || DEFAULT_ASSISTANT_ID}
+                defaultValue={
+                  assistantId || envAssistantId || DEFAULT_ASSISTANT_ID
+                }
                 required
               />
             </div>

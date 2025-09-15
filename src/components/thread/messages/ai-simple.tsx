@@ -11,6 +11,7 @@ interface AIMessageProps {
 
 export function AIMessage({ message, className }: AIMessageProps) {
   const thread = useStreamContext();
+  const { hideToolCalls } = thread;
 
   if (!message || message.role !== 'assistant') {
     return null;
@@ -30,7 +31,7 @@ export function AIMessage({ message, className }: AIMessageProps) {
         )}
 
         {/* Tool calls */}
-        {hasToolCalls && (
+        {!hideToolCalls && hasToolCalls && (
           <div className="space-y-2">
             <div className="text-sm text-muted-foreground">
               Tool calls executed:
