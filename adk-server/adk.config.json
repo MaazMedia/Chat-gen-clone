@@ -4,12 +4,8 @@
     "host": "0.0.0.0"
   },
   "database": {
-    "type": "postgres",
-    "host": "localhost",
-    "port": 5432,
-    "database": "adk_chat",
-    "username": "postgres",
-    "password": "password"
+    "type": "sqlite",
+    "filename": "./adk_chat.db"
   },
   "agents": [
     {

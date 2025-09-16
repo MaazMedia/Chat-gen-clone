@@ -1,6 +1,6 @@
-import * as dotenv from 'dotenv';
-import Database from 'better-sqlite3';
-import * as path from 'path';
+import * as dotenv from "dotenv";
+import Database from "better-sqlite3";
+import * as path from "path";
 
 dotenv.config();
 
@@ -8,14 +8,14 @@ export class SQLiteDatabaseManager {
   private db: Database.Database;
 
   constructor(dbPath?: string) {
-    const defaultPath = path.join(process.cwd(), 'adk_chat.db');
+    const defaultPath = path.join(process.cwd(), "adk_chat.db");
     this.db = new Database(dbPath || defaultPath);
     this.initializeSchema();
   }
 
   private initializeSchema() {
-    console.log('Initializing SQLite database schema...');
-    
+    console.log("Initializing SQLite database schema...");
+
     // Create threads table
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS threads (
@@ -67,38 +67,122 @@ export class SQLiteDatabaseManager {
       )
     `);
 
-    console.log('SQLite database schema initialized');
+    console.log("SQLite database schema initialized");
   }
 
   // Thread operations
   async createThread(agentId: string, title?: string): Promise<string> {
+    console.log(`🆕 [SQLiteManager] createThread called with:`);
+    console.log(`🤖 [SQLiteManager] Agent ID: ${agentId}`);
+    console.log(
+      `📝 [SQLiteManager] Title: ${title || 'No title (will use "New Chat")'}`,
+    );
+
     const id = `thread_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    console.log(`🆔 [SQLiteManager] Generated thread ID: ${id}`);
+
+    const finalTitle = title || "New Chat";
+    console.log(`📝 [SQLiteManager] Final title: ${finalTitle}`);
+
     const stmt = this.db.prepare(`
       INSERT INTO threads (id, agent_id, title)
       VALUES (?, ?, ?)
     `);
-    
-    stmt.run(id, agentId, title || 'New Chat');
-    return id;
+
+    console.log(
+      `💾 [SQLiteManager] Executing INSERT with values: [${id}, ${agentId}, ${finalTitle}]`,
+    );
+
+    try {
+      const result = stmt.run(id, agentId, finalTitle);
+      console.log(`✅ [SQLiteManager] Thread inserted successfully:`, result);
+      console.log(
+        `📊 [SQLiteManager] Changes: ${result.changes}, Last insert rowid: ${result.lastInsertRowid}`,
+      );
+
+      // Verify the thread was created
+      const verifyStmt = this.db.prepare("SELECT * FROM threads WHERE id = ?");
+      const createdThread = verifyStmt.get(id);
+      console.log(
+        `🔍 [SQLiteManager] Verification - created thread:`,
+        createdThread,
+      );
+
+      return id;
+    } catch (error) {
+      console.error(`❌ [SQLiteManager] Error creating thread:`, error);
+      throw error;
+    }
   }
 
   async getThreads(agentId?: string): Promise<any[]> {
-    let query = 'SELECT * FROM threads';
+    console.log(
+      `🔍 [SQLiteManager] getThreads called with agentId: ${agentId}`,
+    );
+
+    // Only return threads that have at least one message
+    let query = `
+      SELECT DISTINCT t.* 
+      FROM threads t 
+      INNER JOIN messages m ON t.id = m.thread_id
+    `;
     let params: any[] = [];
-    
+
     if (agentId) {
-      query += ' WHERE agent_id = ?';
+      query += " WHERE t.agent_id = ?";
       params.push(agentId);
     }
-    
-    query += ' ORDER BY updated_at DESC';
-    
+
+    query += " ORDER BY t.updated_at DESC";
+
+    console.log(`📝 [SQLiteManager] Executing query: ${query}`);
+    console.log(`📋 [SQLiteManager] Query params:`, params);
+
     const stmt = this.db.prepare(query);
-    return stmt.all(...params);
+    const results = stmt.all(...params);
+
+    console.log(`📊 [SQLiteManager] Query returned ${results.length} threads`);
+
+    if (results.length > 0) {
+      console.log(`🗂️  [SQLiteManager] Thread details:`, results);
+    } else {
+      console.log(`📭 [SQLiteManager] No threads with messages found`);
+
+      // Let's also check how many total threads exist (without message filter)
+      const allThreadsQuery = agentId
+        ? "SELECT * FROM threads WHERE agent_id = ? ORDER BY updated_at DESC"
+        : "SELECT * FROM threads ORDER BY updated_at DESC";
+      const allThreadsStmt = this.db.prepare(allThreadsQuery);
+      const allThreads = agentId
+        ? allThreadsStmt.all(agentId)
+        : allThreadsStmt.all();
+      console.log(
+        `📂 [SQLiteManager] Total threads in DB (including empty): ${allThreads.length}`,
+      );
+
+      if (allThreads.length > 0) {
+        console.log(
+          `📄 [SQLiteManager] All thread IDs:`,
+          allThreads.map((t: any) => t.id),
+        );
+      }
+
+      // Let's also check how many messages exist
+      const messagesQuery =
+        "SELECT thread_id, COUNT(*) as message_count FROM messages GROUP BY thread_id";
+      const messagesStmt = this.db.prepare(messagesQuery);
+      const messageCounts = messagesStmt.all();
+      console.log(
+        `💬 [SQLiteManager] Message counts per thread:`,
+        messageCounts,
+      );
+    }
+
+    return results;
   }
 
   async getThread(threadId: string): Promise<any | null> {
-    const stmt = this.db.prepare('SELECT * FROM threads WHERE id = ?');
+    const stmt = this.db.prepare("SELECT * FROM threads WHERE id = ?");
     return stmt.get(threadId) || null;
   }
 
@@ -111,14 +195,43 @@ export class SQLiteDatabaseManager {
     stmt.run(threadId);
   }
 
+  async deleteThread(threadId: string): Promise<void> {
+    console.log(`💾 Database: Attempting to delete thread ${threadId}`);
+
+    // Check if thread exists first
+    const checkStmt = this.db.prepare("SELECT id FROM threads WHERE id = ?");
+    const existingThread = checkStmt.get(threadId);
+
+    if (!existingThread) {
+      console.log(`⚠️  Database: Thread ${threadId} not found`);
+      throw new Error(`Thread ${threadId} not found`);
+    }
+
+    console.log(
+      `📋 Database: Thread ${threadId} exists, proceeding with deletion`,
+    );
+
+    // Delete thread and all associated messages (CASCADE will handle messages)
+    const stmt = this.db.prepare("DELETE FROM threads WHERE id = ?");
+    const result = stmt.run(threadId);
+
+    console.log(
+      `✅ Database: Thread ${threadId} deleted successfully. Changes: ${result.changes}`,
+    );
+  }
+
   // Message operations
-  async addMessage(threadId: string, role: string, content: string): Promise<string> {
+  async addMessage(
+    threadId: string,
+    role: string,
+    content: string,
+  ): Promise<string> {
     const id = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const stmt = this.db.prepare(`
       INSERT INTO messages (id, thread_id, role, content)
       VALUES (?, ?, ?, ?)
     `);
-    
+
     stmt.run(id, threadId, role, content);
     await this.updateThreadTimestamp(threadId);
     return id;
@@ -144,46 +257,54 @@ export class SQLiteDatabaseManager {
       GROUP BY m.id
       ORDER BY m.created_at ASC
     `);
-    
+
     const messages = stmt.all(threadId);
-    
+
     // Parse tool_calls JSON and filter out nulls
     return messages.map((msg: any) => ({
       ...msg,
-      tool_calls: JSON.parse(msg.tool_calls).filter((tc: any) => tc !== null)
+      tool_calls: JSON.parse(msg.tool_calls).filter((tc: any) => tc !== null),
     }));
   }
 
   // Tool call operations
-  async addToolCall(messageId: string, toolName: string, toolInput: any): Promise<string> {
+  async addToolCall(
+    messageId: string,
+    toolName: string,
+    toolInput: any,
+  ): Promise<string> {
     const id = `tool_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const stmt = this.db.prepare(`
       INSERT INTO tool_calls (id, message_id, tool_name, tool_input)
       VALUES (?, ?, ?, ?)
     `);
-    
+
     stmt.run(id, messageId, toolName, JSON.stringify(toolInput));
     return id;
   }
 
-  async updateToolCall(toolCallId: string, output: any, status: string = 'completed'): Promise<void> {
+  async updateToolCall(
+    toolCallId: string,
+    output: any,
+    status: string = "completed",
+  ): Promise<void> {
     const stmt = this.db.prepare(`
       UPDATE tool_calls 
       SET tool_output = ?, status = ?
       WHERE id = ?
     `);
-    
+
     stmt.run(JSON.stringify(output), status, toolCallId);
   }
 
   // Test database connection
   async testConnection(): Promise<boolean> {
     try {
-      const stmt = this.db.prepare('SELECT 1 as test');
+      const stmt = this.db.prepare("SELECT 1 as test");
       const result = stmt.get() as { test: number } | undefined;
       return result?.test === 1;
     } catch (error) {
-      console.error('Database connection test failed:', error);
+      console.error("Database connection test failed:", error);
       return false;
     }
   }

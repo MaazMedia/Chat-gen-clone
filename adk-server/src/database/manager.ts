@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool } from "pg";
 
 export class DatabaseManager {
   constructor(private db: Pool) {}
@@ -64,27 +64,30 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_threads_created_at ON threads(created_at);
     `);
 
-    console.log('Database schema initialized successfully');
+    console.log("Database schema initialized successfully");
   }
 
   async createThread(agentId: string, title?: string) {
+    if (!title) {
+      title = "New Chat";
+    }
     const result = await this.db.query(
-      'INSERT INTO threads (agent_id, title) VALUES ($1, $2) RETURNING *',
-      [agentId, title]
+      "INSERT INTO threads (agent_id, title) VALUES ($1, $2) RETURNING *",
+      [agentId, title],
     );
     return result.rows[0];
   }
 
   async getThreads(agentId?: string, limit: number = 50) {
-    let query = 'SELECT * FROM threads';
+    let query = "SELECT * FROM threads";
     let params: any[] = [];
-    
+
     if (agentId) {
-      query += ' WHERE agent_id = $1';
+      query += " WHERE agent_id = $1";
       params.push(agentId);
     }
-    
-    query += ' ORDER BY updated_at DESC LIMIT $' + (params.length + 1);
+
+    query += " ORDER BY updated_at DESC LIMIT $" + (params.length + 1);
     params.push(limit);
 
     const result = await this.db.query(query, params);
@@ -92,23 +95,27 @@ export class DatabaseManager {
   }
 
   async getThread(threadId: string) {
-    const result = await this.db.query(
-      'SELECT * FROM threads WHERE id = $1',
-      [threadId]
-    );
+    const result = await this.db.query("SELECT * FROM threads WHERE id = $1", [
+      threadId,
+    ]);
     return result.rows[0];
   }
 
-  async addMessage(threadId: string, role: string, content: string, metadata: any = {}) {
+  async addMessage(
+    threadId: string,
+    role: string,
+    content: string,
+    metadata: any = {},
+  ) {
     const result = await this.db.query(
-      'INSERT INTO messages (thread_id, role, content, metadata) VALUES ($1, $2, $3, $4) RETURNING *',
-      [threadId, role, content, JSON.stringify(metadata)]
+      "INSERT INTO messages (thread_id, role, content, metadata) VALUES ($1, $2, $3, $4) RETURNING *",
+      [threadId, role, content, JSON.stringify(metadata)],
     );
 
     // Update thread timestamp
     await this.db.query(
-      'UPDATE threads SET updated_at = CURRENT_TIMESTAMP WHERE id = $1',
-      [threadId]
+      "UPDATE threads SET updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+      [threadId],
     );
 
     return result.rows[0];
@@ -116,32 +123,36 @@ export class DatabaseManager {
 
   async getMessages(threadId: string, limit: number = 100) {
     const result = await this.db.query(
-      'SELECT * FROM messages WHERE thread_id = $1 ORDER BY created_at ASC LIMIT $2',
-      [threadId, limit]
+      "SELECT * FROM messages WHERE thread_id = $1 ORDER BY created_at ASC LIMIT $2",
+      [threadId, limit],
     );
     return result.rows;
   }
 
   async addToolCall(messageId: string, toolName: string, toolInput: any) {
     const result = await this.db.query(
-      'INSERT INTO tool_calls (message_id, tool_name, tool_input) VALUES ($1, $2, $3) RETURNING *',
-      [messageId, toolName, JSON.stringify(toolInput)]
+      "INSERT INTO tool_calls (message_id, tool_name, tool_input) VALUES ($1, $2, $3) RETURNING *",
+      [messageId, toolName, JSON.stringify(toolInput)],
     );
     return result.rows[0];
   }
 
-  async updateToolCall(toolCallId: string, toolOutput: any, status: string = 'completed') {
+  async updateToolCall(
+    toolCallId: string,
+    toolOutput: any,
+    status: string = "completed",
+  ) {
     const result = await this.db.query(
-      'UPDATE tool_calls SET tool_output = $1, status = $2, completed_at = CURRENT_TIMESTAMP WHERE id = $3 RETURNING *',
-      [JSON.stringify(toolOutput), status, toolCallId]
+      "UPDATE tool_calls SET tool_output = $1, status = $2, completed_at = CURRENT_TIMESTAMP WHERE id = $3 RETURNING *",
+      [JSON.stringify(toolOutput), status, toolCallId],
     );
     return result.rows[0];
   }
 
   async getToolCalls(messageId: string) {
     const result = await this.db.query(
-      'SELECT * FROM tool_calls WHERE message_id = $1 ORDER BY created_at ASC',
-      [messageId]
+      "SELECT * FROM tool_calls WHERE message_id = $1 ORDER BY created_at ASC",
+      [messageId],
     );
     return result.rows;
   }

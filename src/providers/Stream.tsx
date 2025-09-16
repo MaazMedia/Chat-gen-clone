@@ -29,7 +29,8 @@ export interface AdkStreamState {
 
 interface StreamContextType {
   state: AdkStreamState;
-  sendMessage: (content: string, files?: File[]) => Promise<void>;
+  sendMessage: (content: string, contentBlocks?: any[]) => Promise<void>;
+  editMessage: (messageId: string, newContent: string) => void;
   createThread: () => Promise<string | null>;
   loadMessages: (threadId: string) => Promise<void>;
   clearError: () => void;
@@ -55,7 +56,7 @@ async function checkApiStatus(
   apiKey: string | null,
 ): Promise<boolean> {
   try {
-    const res = await fetch(`${apiUrl}/agents`, {
+    const res = await fetch(`/api/agents`, {
       ...(apiKey && {
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -149,13 +150,30 @@ const StreamSession = ({
   );
 
   const createThread = useCallback(async (): Promise<string | null> => {
+    console.log(`🆕 [Stream] createThread called`);
+    console.log(`🤖 [Stream] Assistant ID: ${assistantId}`);
+
     try {
+      console.log(`📡 [Stream] Calling apiClient.createThread...`);
       const response = await apiClient.createThread(assistantId);
-      const newThreadId = response.thread.id;
+      console.log(`✅ [Stream] createThread response:`, response);
+
+      const newThreadId = response.thread?.id || response.id;
+      console.log(`🆔 [Stream] New thread ID: ${newThreadId}`);
+
+      if (!newThreadId) {
+        console.error(`❌ [Stream] No thread ID found in response:`, response);
+        return null;
+      }
+
+      console.log(`🔄 [Stream] Setting thread ID to: ${newThreadId}`);
       setThreadId(newThreadId);
 
-      // Refetch threads list
-      sleep().then(() => getThreads().then(setThreads).catch(console.error));
+      // Note: Thread will appear in history after first message is sent
+      // (threads without messages are now filtered out)
+      console.log(
+        `📝 [Stream] Thread created successfully, will appear in history after first message`,
+      );
 
       return newThreadId;
     } catch (error) {
@@ -166,9 +184,9 @@ const StreamSession = ({
           error.code === "ADK_SERVER_UNAVAILABLE" ||
           error.code === "NETWORK_ERROR"
         ) {
-          toast.error("ADK Server Unavailable", {
+          toast.error("Connection Error", {
             description:
-              "Please start the ADK server (npm start in adk-server folder) or check your connection.",
+              "Unable to connect to the local ADK implementation. Please check your configuration or refresh the page.",
             duration: 10000,
             action: {
               label: "Retry",
@@ -197,30 +215,63 @@ const StreamSession = ({
   }, [assistantId, apiClient, setThreadId, getThreads, setThreads]);
 
   const sendMessage = useCallback(
-    async (content: string, files?: File[]) => {
-      const currentThreadId = threadId || (await createThread());
-      if (!currentThreadId) return;
+    async (content: string, contentBlocks?: any[]) => {
+      console.log(`💬 [Stream] sendMessage called`);
+      console.log(`📝 [Stream] Message content: ${content}`);
+      console.log(`📎 [Stream] Content blocks: ${contentBlocks?.length || 0}`);
+      console.log(`🧵 [Stream] Current thread ID: ${threadId || "None"}`);
+
+      let currentThreadId = threadId;
+      if (!currentThreadId) {
+        console.log(`🆕 [Stream] No current thread, creating new one...`);
+        currentThreadId = await createThread();
+        console.log(`🆔 [Stream] Created thread ID: ${currentThreadId}`);
+      } else {
+        console.log(`🔄 [Stream] Using existing thread: ${currentThreadId}`);
+      }
+
+      if (!currentThreadId) {
+        console.error(
+          `❌ [Stream] Failed to get thread ID, aborting message send`,
+        );
+        return;
+      }
 
       setState((prev) => ({ ...prev, isStreaming: true, error: undefined }));
 
       try {
+        // Create user message content
+        let messageContent: string | any[] = content;
+
+        // If we have content blocks (images/files), create multimodal content
+        if (contentBlocks && contentBlocks.length > 0) {
+          messageContent = [{ type: "text", text: content }, ...contentBlocks];
+        }
+
         // Add user message to state immediately
         const userMessage: Message = {
           id: Date.now().toString(),
           role: "user",
-          content,
+          content: messageContent,
           created_at: new Date().toISOString(),
         };
 
-        setState((prev) => ({
-          ...prev,
-          messages: [...prev.messages, userMessage],
-        }));
+        setState((prev) => {
+          // Remove any existing message with the same ID to prevent duplicates
+          const filteredMessages = prev.messages.filter(
+            (m) => m.id !== userMessage.id,
+          );
+          return {
+            ...prev,
+            messages: [...filteredMessages, userMessage],
+          };
+        });
 
-        // Start streaming response
+        // For now, send only text content to the server
+        // TODO: Update server to handle multimodal content
         const stream = await apiClient.streamMessage(
           currentThreadId,
-          content,
+          messageContent, // Send full multimodal content
           assistantId,
         );
         const reader = stream.getReader();
@@ -242,9 +293,21 @@ const StreamSession = ({
               if (line.startsWith("data: ")) {
                 try {
                   const data = JSON.parse(line.slice(6));
+                  console.log(`📦 [Stream] Received SSE data:`, data);
 
-                  if (data.type === "chunk") {
-                    accumulatedContent += data.content;
+                  if (data.type === "thinking") {
+                    console.log(
+                      `🤔 [Stream] Agent is thinking: ${data.content}`,
+                    );
+                    // Optionally show thinking indicator
+                  } else if (data.type === "content") {
+                    if (data.partial === false) {
+                      // Final content - replace any accumulated content
+                      accumulatedContent = data.content;
+                    } else {
+                      // Partial content for streaming effect
+                      accumulatedContent = data.content;
+                    }
 
                     // Update or create assistant message
                     setState((prev) => {
@@ -255,7 +318,7 @@ const StreamSession = ({
                         // Update existing assistant message
                         const updatedMessage = {
                           ...assistantMessage,
-                          content: accumulatedContent.trim(),
+                          content: accumulatedContent,
                         };
                         messages[lastMessageIndex] = updatedMessage;
                         assistantMessage = updatedMessage;
@@ -265,28 +328,68 @@ const StreamSession = ({
                         assistantMessage = {
                           id: tempAssistantMessageId,
                           role: "assistant",
-                          content: accumulatedContent.trim(),
+                          content: accumulatedContent,
                           created_at: new Date().toISOString(),
                         };
-                        if (assistantMessage) {
-                          messages.push(assistantMessage);
-                        }
+                        messages.push(assistantMessage);
                       }
 
                       return { ...prev, messages };
                     });
-                  } else if (data.type === "message") {
-                    // Final message from server - replace the temporary streaming message
+                  } else if (data.type === "tool_call") {
+                    console.log(`🔧 [Stream] Tool call received:`, data);
+                    console.log(
+                      `🔧 [Stream] Current assistant message:`,
+                      assistantMessage,
+                    );
+
+                    // Add tool call to the current assistant message
                     setState((prev) => {
-                      const messages = prev.messages.filter(
-                        (m) => m.id !== tempAssistantMessageId,
+                      console.log(
+                        `🔧 [Stream] Before adding tool call, state:`,
+                        prev,
                       );
-                      return { ...prev, messages: [...messages, data.message] };
+                      const messages = [...prev.messages];
+                      const lastMessageIndex = messages.length - 1;
+
+                      if (assistantMessage && lastMessageIndex >= 0) {
+                        const newToolCall = {
+                          id: `tool_${Date.now()}`,
+                          tool_name: data.tool_name,
+                          tool_input:
+                            typeof data.tool_input === "string"
+                              ? data.tool_input
+                              : JSON.stringify(data.tool_input),
+                          tool_output: data.tool_output,
+                          status: "completed" as const,
+                        };
+
+                        const updatedMessage = {
+                          ...messages[lastMessageIndex],
+                          tool_calls: [
+                            ...(messages[lastMessageIndex].tool_calls || []),
+                            newToolCall,
+                          ],
+                        };
+
+                        messages[lastMessageIndex] = updatedMessage;
+                        assistantMessage = updatedMessage;
+
+                        console.log(
+                          `🔧 [Stream] After adding tool call, updated message:`,
+                          updatedMessage,
+                        );
+                      }
+
+                      const newState = { ...prev, messages };
+                      console.log(
+                        `🔧 [Stream] New state after tool call:`,
+                        newState,
+                      );
+                      return newState;
                     });
-                    // Reset the temporary message tracking
-                    assistantMessage = null;
-                    tempAssistantMessageId = null;
-                  } else if (data.type === "end") {
+                  } else if (data.type === "done") {
+                    console.log(`✅ [Stream] Stream completed`);
                     break;
                   }
                 } catch (e) {
@@ -297,6 +400,25 @@ const StreamSession = ({
           }
         } finally {
           reader.releaseLock();
+          setState((prev) => ({ ...prev, isStreaming: false }));
+
+          // Refresh thread list since this thread now has messages and should appear in history
+          console.log(
+            `🔄 [Stream] Message streaming complete, refreshing thread list...`,
+          );
+          getThreads()
+            .then((updatedThreads) => {
+              console.log(
+                `✅ [Stream] Thread list refreshed, got ${updatedThreads.length} threads`,
+              );
+              setThreads(updatedThreads);
+            })
+            .catch((error) => {
+              console.error(
+                `❌ [Stream] Failed to refresh thread list:`,
+                error,
+              );
+            });
         }
       } catch (error) {
         console.error("Failed to send message:", error);
@@ -306,9 +428,9 @@ const StreamSession = ({
             error.code === "ADK_SERVER_UNAVAILABLE" ||
             error.code === "NETWORK_ERROR"
           ) {
-            toast.error("ADK Server Unavailable", {
+            toast.error("Connection Error", {
               description:
-                "Please start the ADK server (npm start in adk-server folder) or check your connection.",
+                "Unable to connect to the local ADK implementation. Please check your configuration or refresh the page.",
               duration: 10000,
               action: {
                 label: "Retry",
@@ -343,6 +465,15 @@ const StreamSession = ({
     setState((prev) => ({ ...prev, error: undefined }));
   }, []);
 
+  const editMessage = useCallback((messageId: string, newContent: string) => {
+    setState((prev) => ({
+      ...prev,
+      messages: prev.messages.map((msg) =>
+        msg.id === messageId ? { ...msg, content: newContent } : msg,
+      ),
+    }));
+  }, []);
+
   // Load messages when thread ID changes
   useEffect(() => {
     if (threadId) {
@@ -355,11 +486,12 @@ const StreamSession = ({
   useEffect(() => {
     checkApiStatus(apiUrl, apiKey).then((ok) => {
       if (!ok) {
-        toast.error("Failed to connect to ADK server", {
+        toast.error("Local ADK Connection Issue", {
           description: () => (
             <p>
-              Please ensure your ADK server is running at <code>{apiUrl}</code>{" "}
-              and your API key is correctly set (if required).
+              Unable to connect to the local ADK implementation at{" "}
+              <code>{apiUrl}</code>. Please ensure your OpenAI API key is
+              configured correctly.
             </p>
           ),
           duration: 10000,
@@ -373,6 +505,7 @@ const StreamSession = ({
   const contextValue: StreamContextType = {
     state,
     sendMessage,
+    editMessage,
     createThread,
     loadMessages,
     clearError,
@@ -407,8 +540,8 @@ const StreamSession = ({
 };
 
 // Default values for the form
-const DEFAULT_API_URL = "http://localhost:3000/api";
-const DEFAULT_ASSISTANT_ID = "agent";
+const DEFAULT_API_URL = "http://localhost:8080";
+const DEFAULT_ASSISTANT_ID = "general-assistant";
 
 export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   children,
@@ -489,9 +622,9 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
               </h1>
             </div>
             <p className="text-muted-foreground">
-              Welcome to ADK Agent Chat! Let's get you set up with your ADK
-              server configuration. The default values should work for most
-              local development setups.
+              Welcome to ADK Agent Chat! This application uses a local ADK
+              implementation with OpenAI for AI responses. The default values
+              should work for most setups.
             </p>
           </div>
           <form
@@ -514,11 +647,11 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
           >
             <div className="flex flex-col gap-2">
               <Label htmlFor="apiUrl">
-                ADK Server URL<span className="text-rose-500">*</span>
+                Local ADK API URL<span className="text-rose-500">*</span>
               </Label>
               <p className="text-muted-foreground text-sm">
-                This is the URL of your ADK server. Usually the Next.js API
-                proxy endpoint (e.g., http://localhost:3000/api).
+                This is the URL of your local ADK implementation. This should be
+                your Next.js API endpoint (e.g., http://localhost:3000/api).
               </p>
               <Input
                 id="apiUrl"
@@ -548,11 +681,11 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
             </div>
 
             <div className="flex flex-col gap-2">
-              <Label htmlFor="apiKey">ADK API Key</Label>
+              <Label htmlFor="apiKey">API Key (Optional)</Label>
               <p className="text-muted-foreground text-sm">
-                This is <strong>NOT</strong> required if using a local ADK
-                server. This value is stored in your browser's local storage and
-                is only used to authenticate requests sent to your ADK server.
+                This is <strong>NOT</strong> required for the local ADK
+                implementation. The system uses OpenAI directly, which is
+                configured via environment variables.
               </p>
               <PasswordInput
                 id="apiKey"
@@ -581,8 +714,8 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   return (
     <StreamSession
       apiKey={apiKey}
-      apiUrl={apiUrl}
-      assistantId={assistantId}
+      apiUrl={finalApiUrl}
+      assistantId={finalAssistantId}
     >
       {children}
     </StreamSession>

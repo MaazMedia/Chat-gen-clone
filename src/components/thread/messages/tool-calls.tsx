@@ -7,18 +7,42 @@ function isComplexValue(value: any): boolean {
   return Array.isArray(value) || (typeof value === "object" && value !== null);
 }
 
-export function ToolCalls({
-  toolCalls,
-}: {
-  toolCalls: AIMessage["tool_calls"];
-}) {
-  if (!toolCalls || toolCalls.length === 0) return null;
+export function ToolCalls({ toolCalls }: { toolCalls: ToolCall[] }) {
+  console.log("=== TOOL CALLS COMPONENT DEBUG ===");
+  console.log("Tool calls received:", toolCalls);
+  console.log("Tool calls length:", toolCalls?.length);
+  console.log("Tool calls type:", typeof toolCalls);
+  console.log("===================================");
+
+  if (!toolCalls || toolCalls.length === 0) {
+    console.log("❌ ToolCalls component: No tool calls to display");
+    return null;
+  }
+
+  console.log(
+    "✅ ToolCalls component: Rendering",
+    toolCalls.length,
+    "tool calls",
+  );
 
   return (
     <div className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2">
-      {toolCalls.map((tc, idx) => {
-        const args = tc.args as Record<string, any>;
-        const hasArgs = Object.keys(args).length > 0;
+      {toolCalls.map((tc: ToolCall, idx: number) => {
+        // Handle ADK format (tool_input, tool_name)
+        const args = (
+          typeof tc.tool_input === "string"
+            ? (() => {
+                try {
+                  return JSON.parse(tc.tool_input);
+                } catch {
+                  return { input: tc.tool_input };
+                }
+              })()
+            : tc.tool_input
+        ) as Record<string, any>;
+        const toolName = tc.tool_name || "Unknown Tool";
+        const hasArgs = args && Object.keys(args).length > 0;
+
         return (
           <div
             key={idx}
@@ -26,11 +50,21 @@ export function ToolCalls({
           >
             <div className="border-b border-gray-200 bg-gray-50 px-4 py-2">
               <h3 className="font-medium text-gray-900">
-                {tc.name}
+                {toolName}
                 {tc.id && (
                   <code className="ml-2 rounded bg-gray-100 px-2 py-1 text-sm">
                     {tc.id}
                   </code>
+                )}
+                {tc.tool_output && (
+                  <span className="ml-2 text-sm text-green-600">
+                    ✓ Result:{" "}
+                    {typeof tc.tool_output === "object"
+                      ? tc.tool_output.result ||
+                        tc.tool_output.explanation ||
+                        "Completed"
+                      : String(tc.tool_output)}
+                  </span>
                 )}
               </h3>
             </div>

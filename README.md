@@ -41,12 +41,14 @@ A complete reference architecture for a chat AI bot using Next.js frontend with 
 ### Option 1: Docker Compose (Recommended)
 
 1. **Clone and setup**:
+
    ```bash
    git clone <your-repo-url>
    cd agent-chat-ui
    ```
 
 2. **Start the full stack**:
+
    ```bash
    docker-compose up --build
    ```
@@ -64,12 +66,14 @@ A complete reference architecture for a chat AI bot using Next.js frontend with 
    - pnpm (recommended) or npm
 
 2. **Setup PostgreSQL**:
+
    ```bash
    # Install and start PostgreSQL
    createdb adk_chat
    ```
 
 3. **Setup ADK Server**:
+
    ```bash
    cd adk-server
    npm install
@@ -79,6 +83,7 @@ A complete reference architecture for a chat AI bot using Next.js frontend with 
    ```
 
 4. **Setup Frontend**:
+
    ```bash
    # In project root
    pnpm install
@@ -88,25 +93,24 @@ A complete reference architecture for a chat AI bot using Next.js frontend with 
    ```
 
 5. **Access the application**:
-   - Frontend: http://localhost:3000
-   - ADK Server: http://localhost:8080
+   - Frontend with Local ADK: http://localhost:3000
+   - pgAdmin (if using Docker): http://localhost:5050
 
 ## Configuration
 
 ### Environment Variables
 
-#### Frontend (.env.local)
+#### Application (.env.local)
+
 ```bash
+# Local ADK Configuration (No external server required)
 NEXT_PUBLIC_API_URL=http://localhost:3000/api
 NEXT_PUBLIC_ASSISTANT_ID=math-assistant
-ADK_API_URL=http://localhost:8080
-ADK_API_KEY=
-```
 
-#### ADK Server (.env)
-```bash
-ADK_PORT=8080
-ADK_HOST=0.0.0.0
+# OpenAI Configuration (Required for local ADK agents)
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Optional: PostgreSQL for data persistence
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 POSTGRES_DB=adk_chat
@@ -114,9 +118,9 @@ POSTGRES_USER=postgres
 POSTGRES_PASSWORD=password
 ```
 
-#### OpenAI Fallback Configuration
+#### Local ADK Implementation
 
-When the ADK server is unavailable, the application can automatically fall back to OpenAI's API for a seamless user experience. Add these variables to your `.env.local`:
+The application now runs Google ADK agents locally within Next.js, eliminating the need for a separate ADK server. The local implementation includes:
 
 ```bash
 # OpenAI Fallback Configuration
@@ -126,6 +130,7 @@ ENABLE_OPENAI_FALLBACK=true
 ```
 
 **Features:**
+
 - 🔄 **Automatic Fallback**: Seamlessly switches to OpenAI when ADK server is down
 - 🎯 **Preserved Experience**: Maintains same UI/UX with OpenAI backend
 - 📝 **Thread Management**: Creates and manages conversation threads
@@ -138,11 +143,13 @@ ENABLE_OPENAI_FALLBACK=true
 The ADK server comes with two sample agents:
 
 #### Math Assistant (`math-assistant`)
+
 - **Tools**: Calculator, Equation Solver
 - **Capabilities**: Basic arithmetic, linear equation solving
-- **Example**: "Calculate 2 + 3 * 4" or "Solve 2x + 5 = 13"
+- **Example**: "Calculate 2 + 3 \* 4" or "Solve 2x + 5 = 13"
 
 #### Web Researcher (`web-researcher`)
+
 - **Tools**: Web Search, URL Fetcher
 - **Capabilities**: Simulated web search and content fetching
 - **Example**: "Search for information about Next.js" or "Fetch content from https://example.com"
@@ -159,6 +166,7 @@ The ADK server automatically creates the following tables:
 ## API Endpoints
 
 ### ADK Server
+
 - `GET /agents` - List available agents
 - `GET /threads` - List threads (optional agent_id filter)
 - `POST /threads` - Create new thread
@@ -167,6 +175,7 @@ The ADK server automatically creates the following tables:
 - `POST /threads/:id/messages/stream` - Stream message response
 
 ### Next.js Proxy
+
 - `/api/*` - Proxies all requests to ADK server
 
 ## Development
@@ -174,20 +183,21 @@ The ADK server automatically creates the following tables:
 ### Adding New Agents
 
 1. Create agent class in `adk-server/src/agents/`:
+
    ```typescript
    export class MyAgent {
-     public id = 'my-agent';
-     public name = 'My Agent';
-     public description = 'Description of what the agent does';
-     
+     public id = "my-agent";
+     public name = "My Agent";
+     public description = "Description of what the agent does";
+
      public tools = [
        // Define tools here
      ];
-     
+
      async invoke(message: string, context: any = {}) {
        // Agent logic here
      }
-     
+
      async executeTool(toolId: string, input: any) {
        // Tool execution logic here
      }
@@ -197,7 +207,7 @@ The ADK server automatically creates the following tables:
 2. Register in `adk-server/src/server.ts`:
    ```typescript
    const myAgent = new MyAgent();
-   this.adkServer.registerAgent('my-agent', myAgent);
+   this.adkServer.registerAgent("my-agent", myAgent);
    ```
 
 ### Customizing the UI
@@ -214,6 +224,7 @@ The frontend preserves all the original agent-chat-ui components. Key files:
 To verify ADK-web compatibility:
 
 1. **Install adk-web**:
+
    ```bash
    git clone https://github.com/google/adk-web
    cd adk-web
@@ -221,6 +232,7 @@ To verify ADK-web compatibility:
    ```
 
 2. **Point to your ADK server**:
+
    ```bash
    # Configure adk-web to use http://localhost:8080
    ```
@@ -240,6 +252,7 @@ To verify ADK-web compatibility:
    - Verify ADK server is accessible
 
 2. **Docker issues**:
+
    ```bash
    # Reset containers
    docker-compose down -v
@@ -251,10 +264,11 @@ To verify ADK-web compatibility:
    - Update NEXT_PUBLIC_API_URL accordingly
 
 4. **Missing dependencies**:
+
    ```bash
    # Frontend
    pnpm install
-   
+
    # Backend
    cd adk-server && npm install
    ```
@@ -323,26 +337,27 @@ This project maintains the same license as the original agent-chat-ui.
 - Next.js and React communities for the excellent tooling
   content?: string;
   description?: string;
-}) {
+  }) {
   const [Artifact, { open, setOpen }] = useArtifact();
 
   return (
-    <>
-      <div
-        onClick={() => setOpen(!open)}
-        className="cursor-pointer rounded-lg border p-4"
-      >
-        <p className="font-medium">{props.title}</p>
-        <p className="text-sm text-gray-500">{props.description}</p>
-      </div>
+  <>
+  <div
+  onClick={() => setOpen(!open)}
+  className="cursor-pointer rounded-lg border p-4" >
+  <p className="font-medium">{props.title}</p>
+  <p className="text-sm text-gray-500">{props.description}</p>
+  </div>
 
-      <Artifact title={props.title}>
-        <p className="p-4 whitespace-pre-wrap">{props.content}</p>
-      </Artifact>
-    </>
+        <Artifact title={props.title}>
+          <p className="p-4 whitespace-pre-wrap">{props.content}</p>
+        </Artifact>
+      </>
+
   );
-}
-```
+  }
+
+````
 
 ## Going to Production
 
@@ -366,7 +381,7 @@ LANGGRAPH_API_URL="https://my-agent.default.us.langgraph.app"
 NEXT_PUBLIC_API_URL="https://my-website.com/api"
 # Your LangSmith API key which is injected into requests inside the API proxy
 LANGSMITH_API_KEY="lsv2_..."
-```
+````
 
 Let's cover what each of these environment variables does:
 

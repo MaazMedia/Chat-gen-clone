@@ -1,6 +1,12 @@
 import { parsePartialJson } from "@/lib/adk-types";
 import { useStreamContext } from "@/providers/Stream";
-import { AIMessage, Checkpoint, Message, MessageContentComplex, getContentString } from "@/lib/adk-types";
+import {
+  AIMessage,
+  Checkpoint,
+  Message,
+  MessageContentComplex,
+  getContentString,
+} from "@/lib/adk-types";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MarkdownText } from "../markdown-text";
 import { cn } from "@/lib/utils";
@@ -78,13 +84,10 @@ function Interrupt({
   return (
     <>
       {/* Agent inbox functionality temporarily disabled */}
-      {false && interruptValue &&
-        (isLastMessage || hasNoAIOrToolMessages) && (
-          <div>Agent inbox interrupt handling (disabled)</div>
-        )}
-      {interruptValue &&
-      true &&
-      (isLastMessage || hasNoAIOrToolMessages) ? (
+      {false && interruptValue && (isLastMessage || hasNoAIOrToolMessages) && (
+        <div>Agent inbox interrupt handling (disabled)</div>
+      )}
+      {interruptValue && true && (isLastMessage || hasNoAIOrToolMessages) ? (
         <GenericInterruptView interrupt={interruptValue} />
       ) : null}
     </>
@@ -100,6 +103,7 @@ export function AssistantMessage({
   isLoading: boolean;
   handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
 }) {
+  console.log("🚀 ASSISTANT MESSAGE COMPONENT CALLED!", message?.id);
   const content = message?.content ?? [];
   const contentString = getContentString(content);
 
@@ -123,11 +127,20 @@ export function AssistantMessage({
     "tool_calls" in message &&
     message.tool_calls &&
     message.tool_calls.length > 0;
-  const toolCallsHaveContents =
-    hasToolCalls &&
-    message.tool_calls?.some(
-      (tc) => tc.args && Object.keys(tc.args).length > 0,
-    );
+
+  console.log("=== ASSISTANT MESSAGE DEBUG ===");
+  console.log("Message ID:", message?.id);
+  console.log("Message type:", message?.type);
+  console.log("Full message object:", message);
+  console.log("Has tool_calls property:", "tool_calls" in (message || {}));
+  console.log("Tool calls raw:", message?.tool_calls);
+  console.log("Tool calls type:", typeof message?.tool_calls);
+  console.log("Tool calls length:", message?.tool_calls?.length);
+  console.log("Has tool calls (computed):", hasToolCalls);
+  console.log("Hide tool calls prop:", hideToolCalls);
+  console.log("Should show tool calls:", !hideToolCalls && hasToolCalls);
+  console.log("Content string:", contentString);
+  console.log("==============================");
   const hasAnthropicToolCalls = !!anthropicStreamedToolCalls?.length;
   const isToolResult = message?.type === "tool";
 
@@ -155,19 +168,59 @@ export function AssistantMessage({
               </div>
             )}
 
-            {!hideToolCalls && (
-              <>
-                {(hasToolCalls && toolCallsHaveContents && (
-                  <ToolCalls toolCalls={message.tool_calls} />
-                )) ||
-                  (hasAnthropicToolCalls && (
-                    <ToolCalls toolCalls={anthropicStreamedToolCalls} />
-                  )) ||
-                  (hasToolCalls && (
-                    <ToolCalls toolCalls={message.tool_calls} />
-                  ))}
-              </>
+            {!hideToolCalls && hasToolCalls && (
+              <ToolCalls toolCalls={message.tool_calls || []} />
             )}
+
+            {/* TEMPORARY: Force display test tool call */}
+            {!hideToolCalls && (
+              <div
+                style={{
+                  border: "2px solid red",
+                  padding: "10px",
+                  margin: "10px",
+                }}
+              >
+                <h3>TEST TOOL CALL DISPLAY:</h3>
+                <ToolCalls
+                  toolCalls={[
+                    {
+                      id: "test-tool-call-123",
+                      tool_name: "TestCalculator",
+                      tool_input: { expression: "2 + 2" },
+                      tool_output: { result: 4 },
+                    },
+                  ]}
+                />
+              </div>
+            )}
+
+            {/* Temporary test: Show tool calls for any assistant message that mentions a calculation */}
+            {!hideToolCalls &&
+              message &&
+              message.role === "assistant" &&
+              typeof message.content === "string" &&
+              message.content.includes("answer") && (
+                <div className="mt-2 rounded border border-blue-500 p-2">
+                  <p className="mb-2 text-sm text-blue-600">
+                    Test Tool Call Display:
+                  </p>
+                  <ToolCalls
+                    toolCalls={[
+                      {
+                        id: "test_tool_call",
+                        tool_name: "Calculator",
+                        tool_input: '{"expression":"test"}',
+                        tool_output: {
+                          result: "test",
+                          explanation: "This is a test tool call",
+                        },
+                        status: "completed" as const,
+                      },
+                    ]}
+                  />
+                </div>
+              )}
 
             {message && (
               <CustomComponent

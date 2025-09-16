@@ -1,7 +1,5 @@
-version: '3.8'
-
 services:
-  # PostgreSQL Database
+  # PostgreSQL Database (Optional - for future data persistence)
   postgres:
     image: postgres:17-alpine
     container_name: adk-postgres
@@ -22,36 +20,7 @@ services:
     networks:
       - adk-network
 
-  # ADK Server
-  adk-server:
-    build:
-      context: .
-      dockerfile: adk-server/Dockerfile
-    container_name: adk-server
-    environment:
-      ADK_PORT: 8080
-      ADK_HOST: 0.0.0.0
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: adk_chat
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-    ports:
-      - "8080:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ./adk-server/adk.config.json:/app/adk.config.json
-    networks:
-      - adk-network
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/agents"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # Next.js Frontend
+  # Next.js Frontend with Local ADK
   web:
     build:
       context: .
@@ -60,23 +29,30 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:3000/api
       NEXT_PUBLIC_ASSISTANT_ID: math-assistant
-      ADK_API_URL: http://adk-server:8080
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # PostgreSQL connection (optional)
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: adk_chat
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
     ports:
       - "3000:3000"
-    depends_on:
-      adk-server:
-        condition: service_healthy
     networks:
       - adk-network
+    # Note: PostgreSQL dependency is optional since local ADK works without it
+    # depends_on:
+    #   postgres:
+    #     condition: service_healthy
 
-  # pgAdmin for database management
+  # pgAdmin for database management (Optional)
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: adk-pgadmin
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@example.com
       PGADMIN_DEFAULT_PASSWORD: admin
-      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_SERVER_MODE: "False"
     ports:
       - "5050:80"
     depends_on:

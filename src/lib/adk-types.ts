@@ -1,14 +1,14 @@
 // ADK-compatible types to replace LangGraph SDK types
 export interface Message {
   id: string;
-  role: 'user' | 'assistant' | 'system' | 'tool';
-  content: string;
+  role: "user" | "assistant" | "system" | "tool";
+  content: string | (Base64ContentBlock | TextContentBlock)[];
   created_at?: string;
   tool_calls?: ToolCall[];
 }
 
 export interface AIMessage extends Message {
-  role: 'assistant';
+  role: "assistant";
 }
 
 export interface ToolCall {
@@ -16,29 +16,34 @@ export interface ToolCall {
   tool_name: string;
   tool_input: any;
   tool_output?: any;
-  status?: 'pending' | 'completed' | 'failed';
+  status?: "pending" | "completed" | "failed";
 }
 
 export interface ToolMessage extends Message {
-  role: 'tool';
+  role: "tool";
   tool_call_id: string;
 }
 
 export interface Base64ContentBlock {
-  type: 'base64';
-  media_type: string;
+  type: "image" | "file";
+  source_type: "base64";
+  mime_type: string;
   data: string;
+  metadata?: {
+    name?: string;
+    filename?: string;
+  };
 }
 
 export interface TextContentBlock {
-  type: 'text';
+  type: "text";
   text: string;
 }
 
 export type ContentBlock = Base64ContentBlock | TextContentBlock;
 
 export interface MessageContentComplex {
-  type: 'text' | 'image';
+  type: "text" | "image";
   text?: string;
   image_url?: { url: string };
 }
@@ -51,20 +56,20 @@ export interface Checkpoint {
 
 // LangGraph prebuilt types compatibility
 export interface HumanInterrupt {
-  type: 'human_interrupt';
+  type: "human_interrupt";
   message: string;
   options?: string[];
   timeout?: number;
 }
 
 export interface HumanResponse {
-  type: 'human_response';
+  type: "human_response";
   response: string;
   interrupt_id: string;
 }
 
 export interface ActionRequest {
-  type: 'action_request';
+  type: "action_request";
   action: string;
   parameters?: any;
 }
@@ -76,10 +81,10 @@ export interface Thread {
   metadata?: Record<string, any>;
 }
 
-export type ThreadStatus = 'active' | 'idle' | 'busy' | 'interrupted' | 'error';
+export type ThreadStatus = "active" | "idle" | "busy" | "interrupted" | "error";
 
 // Special constants
-export const END = '__end__';
+export const END = "__end__";
 
 // Utility functions
 export function parsePartialJson(str: string): any {
@@ -87,7 +92,7 @@ export function parsePartialJson(str: string): any {
     return JSON.parse(str);
   } catch {
     // Try to parse partial JSON by attempting to complete it
-    const completedStr = str.trim().endsWith('}') ? str : str + '}';
+    const completedStr = str.trim().endsWith("}") ? str : str + "}";
     try {
       return JSON.parse(completedStr);
     } catch {
@@ -96,12 +101,14 @@ export function parsePartialJson(str: string): any {
   }
 }
 
-export function getContentString(content: string | MessageContentComplex[]): string {
-  if (typeof content === 'string') {
+export function getContentString(
+  content: string | MessageContentComplex[],
+): string {
+  if (typeof content === "string") {
     return content;
   }
   if (Array.isArray(content)) {
-    return content.map(item => item.text || '[Media Content]').join(' ');
+    return content.map((item) => item.text || "[Media Content]").join(" ");
   }
   return String(content);
 }
